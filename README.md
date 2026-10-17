@@ -28,19 +28,31 @@
 
 ## 架构设计
 
-```
-                    ┌─────────────────────────────────────┐
-   scan_dir()       │            ThreadPool               │
- (生产者/主线程)     │                                     │
-                    │   tasks ───► 侵入式双向链表队列       │
- 每发现一个文件      │     ▲                             │
- 创建 nTask ────────┼─────┘        mutex + cond 保护      │
- (任务入队+signal)   │                                     │
-                    │  workers ──► 8 个 worker 线程        │
-                    │    │  循环: 等任务→取任务→锁外计算    │
-                    │    └──► compute_hash_func()         │
-                    │          MD5+SHA1+SHA256 单次读取    │
-                    └─────────────────────────────────────┘
+```mermaid
+flowchart LR
+    subgraph P["主线程 · 生产者"]
+        direction TB
+        A["scan_dir()<br/>递归扫描目录树"] --> B["创建 nTask<br/>每发现一个文件"]
+    end
+
+    subgraph TP["ThreadPool"]
+        direction TB
+        Q[("任务队列<br/>双向链表<br/>mutex + cond")]
+        subgraph WS["Worker 线程 × 8"]
+            W["等任务 → 锁内取任务<br/>→ 锁外计算哈希"]
+        end
+        Q --> W
+    end
+
+    B -- "push + signal" --> Q
+    W --> C["compute_hash_func()<br/>4KB 分块单次读取<br/>MD5 · SHA1 · SHA256"]
+    C --> O["CSV → stdout<br/>报告 → stderr"]
+
+    style P fill:#f0fff4,stroke:#2ea043
+    style TP fill:#f0f7ff,stroke:#0969da
+    style Q fill:#fff8c5,stroke:#d4a72c
+    style C fill:#fdf0ff,stroke:#8250df
+    style O fill:#f6f8fa,stroke:#57606a
 ```
 
 核心设计要点：
